@@ -4,8 +4,7 @@ Python大數據分析應用
 https://github.com/roberthsu2003/
 
 #####	Python基本語法	
-#####	Python條件分析和迴圈		
-
+#####	Python條件分析和迴圈\n
 #####	Python內建的資料結構	
 #####	Python函式和匿名函式	
 
