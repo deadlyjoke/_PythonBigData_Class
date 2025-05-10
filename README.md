@@ -1,7 +1,7 @@
 # _PythonBigData_Class
 Python大數據分析應用
 ##上課網址
-https://github.com/roberthsu2003/
+https://meet.google.com/qkf-btyj-jnz
 
 #####	Python基本語法	
 #####	Python條件分析和迴圈
