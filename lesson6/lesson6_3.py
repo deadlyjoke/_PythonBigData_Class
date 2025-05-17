@@ -1,6 +1,7 @@
 import random
 
 def play_game():
+
   print("=====猜數字遊戲開始=========\n\n")
   min = 1
   max = 99
@@ -22,5 +23,11 @@ def play_game():
       min = input_number + 1
 
     print(f"您已經猜了:{count}次\n")
-play_game()
+
+while(True):
+  play_game()
+  play_again = input("是否要再玩一次? (y/n):")
+  if (play_again == 'n'):
+    break
+
 print("Game Over")
