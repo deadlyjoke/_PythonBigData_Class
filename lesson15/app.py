@@ -68,6 +68,10 @@ def create_close_price_dataframe():
             try:
                 df = pd.read_csv(os.path.join(DATA_DIR, stock_file), index_col=0, parse_dates=True)
                 df = df[['Close']].rename(columns={'Close': name})
+
+                # 強制轉換為數值，非數字會變 NaN
+                df = df.apply(pd.to_numeric, errors='coerce')
+
                 all_dfs.append(df)
             except Exception as e:
                 st.warning(f"{stock_file} 讀取失敗：{e}")
@@ -91,13 +95,6 @@ df = create_close_price_dataframe()
 
 if df is None or df.empty:
     st.warning("尚無可用資料，請先下載。")
-    st.stop()
-
-# 資料預處理：確保全為數值型
-try:
-    df = df.astype(float)
-except Exception as e:
-    st.error(f"轉換為數值時發生錯誤：{e}")
     st.stop()
 
 # 去除缺漏值
