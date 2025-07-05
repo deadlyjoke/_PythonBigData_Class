@@ -1,111 +1,157 @@
 import streamlit as st
 import yfinance as yf
-import pandas as pd
-from datetime import datetime
 import os
+import pandas as pd
 
-STOCKS = ['2330.TW', '2303.TW', '2454.TW', '2317.TW']
-STOCK_NAMES = {
-    '2330': '台積電',
-    '2303': '聯電',
-    '2454': '聯發科',
-    '2317': '鴻海'
-}
-DATA_DIR = 'data'
-START_DATE = '2000-01-01'
-
-def get_latest_trading_date(ticker):
-    df = yf.download(ticker, period="5d", interval="1d", auto_adjust=True)
-    if df.empty:
-        return None
-    return df.index[-1].strftime('%Y-%m-%d')
-
-def download_data():
-    os.makedirs(DATA_DIR, exist_ok=True)
-
-    for ticker in STOCKS:
-        stock_code = ticker.split('.')[0]
-        latest_date = get_latest_trading_date(ticker)
-        if latest_date is None:
-            st.warning(f"找不到 {ticker} 的最近交易日，跳過下載。")
+def download_tw_stocks():
+    stock_list = ['2330.TW', '2303.TW', '2454.TW', '2317.TW']
+    from datetime import datetime
+    today_str = datetime.today().strftime('%Y-%m-%d')
+    data_dir = 'data'
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+    for stock in stock_list:
+        stock_code = stock.split('.')[0]
+        filename = f"{stock_code}_{today_str}.csv"
+        filepath = os.path.join(data_dir, filename)
+        if os.path.exists(filepath):
             continue
+        df = yf.download(
+            stock,
+            start="2010-01-01",
+            end=today_str,
+            auto_adjust=False
+        )
+        df.to_csv(filepath)
 
-        today_filename = f"{stock_code}_{latest_date}.csv"
-        today_filepath = os.path.join(DATA_DIR, today_filename)
-
-        if os.path.exists(today_filepath):
-            st.info(f"{stock_code} 資料已是最新（{latest_date}），跳過下載。")
+def load_adjclose_dataframe():
+    code_to_name = {
+        '2330': '台積電',
+        '2303': '聯電',
+        '2454': '聯發科',
+        '2317': '鴻海'
+    }
+    data_dir = 'data'
+    series_dict = {}
+    for code, name in code_to_name.items():
+        files = [f for f in os.listdir(data_dir) if f.startswith(code+'_') and f.endswith('.csv')]
+        if not files:
             continue
+        files.sort(reverse=True)
+        filepath = os.path.join(data_dir, files[0])
+        df = pd.read_csv(filepath, index_col=0)
+        df.index = pd.to_datetime(df.index, errors='coerce')
+        df = df[~df.index.isna()]
+        if 'Adj Close' in df.columns:
+            series_dict[name] = df['Adj Close']
+    result_df = pd.DataFrame(series_dict)
+    return result_df
 
-        try:
-            st.write(f"下載 {stock_code} 的資料中...")
-            data = yf.download(ticker, start=START_DATE, end=latest_date, auto_adjust=True)
-            if data.empty:
-                st.warning(f"{ticker} 無資料，跳過。")
-                continue
+# --- Streamlit App Start ---
+# 初始化 session_state
+if 'start_date_selected' not in st.session_state:
+    st.session_state.start_date_selected = None
+if 'end_date_selected' not in st.session_state:
+    st.session_state.end_date_selected = None
 
-            data.to_csv(today_filepath)
-            st.success(f"儲存為 {today_filepath}")
+with st.spinner('正在下載最新的股票資料...'):
+    download_tw_stocks()
+with st.spinner('正在載入股票資料...'):
+    df = load_adjclose_dataframe()
 
-            # 清除舊資料
-            for file in os.listdir(DATA_DIR):
-                if file.startswith(f"{stock_code}_") and file.endswith(".csv") and file != today_filename:
-                    os.remove(os.path.join(DATA_DIR, file))
-                    st.info(f"刪除舊檔案 {file}")
-        except Exception as e:
-            st.error(f"{ticker} 下載失敗：{e}")
+st.title("台股歷史股價視覺化")
+st.write("本應用程式提供台股歷史股價查詢與視覺化功能。請選擇您感興趣的股票及日期區間，即可查看股價走勢圖與詳細數據。")
 
-def create_close_price_dataframe():
-    if not os.path.isdir(DATA_DIR):
-        st.warning("data 資料夾不存在，請先下載資料。")
-        return None
+options = sorted(list(df.columns))
+default = [name for name in options if "台積電" in name]
+selected = st.multiselect(
+    "請選擇股票（可複選）",
+    options=options,
+    default=default
+)
 
-    all_dfs = []
+if not df.empty:
+    if not pd.api.types.is_datetime64_any_dtype(df.index):
+        df.index = pd.to_datetime(df.index, errors='coerce')
+        df = df[~df.index.isna()]
 
-    for code, name in STOCK_NAMES.items():
-        stock_file = next((f for f in os.listdir(DATA_DIR) if f.startswith(f"{code}_") and f.endswith(".csv")), None)
-        if stock_file:
-            try:
-                df = pd.read_csv(os.path.join(DATA_DIR, stock_file), index_col=0, parse_dates=True)
-                df = df[['Close']].rename(columns={'Close': name})
+    today = pd.to_datetime('today').date()
 
-                # 強制轉換為數值，非數字會變 NaN
-                df = df.apply(pd.to_numeric, errors='coerce')
+    # 預設日期區間
+    last_7_dates = df.index[-7:]
+    start_default = last_7_dates[0].date()
+    end_default = last_7_dates[-1].date()
 
-                all_dfs.append(df)
-            except Exception as e:
-                st.warning(f"{stock_file} 讀取失敗：{e}")
-        else:
-            st.warning(f"找不到 {code} 的資料。")
+    # 如果 session_state 中的日期為 None，則設定為預設值
+    if st.session_state.start_date_selected is None:
+        st.session_state.start_date_selected = start_default
+    if st.session_state.end_date_selected is None:
+        st.session_state.end_date_selected = end_default
 
-    if not all_dfs:
-        return None
+    # 快速選擇按鈕
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        if st.button('近一週'):
+            st.session_state.start_date_selected = max((pd.Timestamp(today) - pd.Timedelta(weeks=1)).date(), df.index[0].date())
+            st.session_state.end_date_selected = min(today, df.index[-1].date())
+    with col2:
+        if st.button('近一月'):
+            st.session_state.start_date_selected = max((pd.Timestamp(today) - pd.Timedelta(days=30)).date(), df.index[0].date())
+            st.session_state.end_date_selected = min(today, df.index[-1].date())
+    with col3:
+        if st.button('近三月'):
+            st.session_state.start_date_selected = max((pd.Timestamp(today) - pd.Timedelta(days=90)).date(), df.index[0].date())
+            st.session_state.end_date_selected = min(today, df.index[-1].date())
+    with col4:
+        if st.button('今年以來'):
+            st.session_state.start_date_selected = max(pd.to_datetime(f'{today.year}-01-01').date(), df.index[0].date())
+            st.session_state.end_date_selected = min(today, df.index[-1].date())
 
-    final_df = pd.concat(all_dfs, axis=1)
-    final_df.sort_index(inplace=True)
-    return final_df
+    # 日期選擇器
+    start_date_input = st.date_input("開始時間", value=st.session_state.start_date_selected, min_value=df.index[0].date(), max_value=df.index[-1].date())
+    end_date_input = st.date_input("結束時間", value=st.session_state.end_date_selected, min_value=df.index[0].date(), max_value=df.index[-1].date())
 
-# ========== Streamlit UI ==========
-st.title("📈 台灣四大科技股每日收盤價")
+    # 更新 session_state 中的日期
+    if start_date_input != st.session_state.start_date_selected:
+        st.session_state.start_date_selected = start_date_input
+    if end_date_input != st.session_state.end_date_selected:
+        st.session_state.end_date_selected = end_date_input
 
-if st.button("📥 下載 / 更新最新資料"):
-    download_data()
+else:
+    st.warning("資料為空，無法選擇日期。")
+    st.session_state.start_date_selected = None
+    st.session_state.end_date_selected = None
 
-df = create_close_price_dataframe()
-
-if df is None or df.empty:
-    st.warning("尚無可用資料，請先下載。")
-    st.stop()
-
-# 去除缺漏值
-plot_df = df.dropna()
-
-if plot_df.empty:
-    st.warning("所有資料都有缺值，無法繪圖。")
-    st.stop()
-
-st.subheader("📊 收盤價趨勢圖")
-st.line_chart(plot_df)
-
-st.subheader("📄 原始資料（最新5筆）")
-st.dataframe(plot_df.tail())
+if selected and st.session_state.start_date_selected and st.session_state.end_date_selected:
+    mask = (df.index.date >= st.session_state.start_date_selected) & (df.index.date <= st.session_state.end_date_selected)
+    filtered_df = df.loc[mask, selected]
+    filtered_df = filtered_df.apply(pd.to_numeric, errors='coerce')
+    filtered_df = filtered_df.dropna(axis=0, how='all').dropna(axis=1, how='all')
+    if not filtered_df.empty:
+        for col in filtered_df.columns:
+            chart_data = filtered_df[[col]].round(0)
+            st.subheader(f"{col} 股價走勢")
+            # 動態調整y軸起始值
+            min_val = chart_data.min().min()
+            max_val = chart_data.max().max()
+            margin = (max_val - min_val) * 0.1 if max_val > min_val else 1
+            y_min = int(min_val - margin)
+            y_max = int(max_val + margin)
+            # 使用plotly顯示可自訂y軸
+            import plotly.graph_objects as go
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=chart_data.index, y=chart_data[col], mode='lines', name=col))
+            fig.update_layout(
+                yaxis=dict(range=[y_min, y_max], tickformat=',d'),
+                xaxis_title="日期",
+                yaxis_title="收盤價",
+                showlegend=False
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        st.subheader("篩選後的股價資料")
+        st.dataframe(filtered_df.round(2))
+    else:
+        st.info("所選區間內無可用數值資料")
+else:
+    st.info("請選擇股票與日期區間")
+# --- Streamlit App End ---
